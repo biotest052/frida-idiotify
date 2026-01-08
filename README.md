@@ -26,18 +26,7 @@ adb push frida-idiotify.js /data/local/tmp/frida-idiotify.js
 adb push wrappers.js /data/local/tmp/wrappers.js
 ```
 
-2. configure frida gadget to load the agent:
-
-```json
-{
-  "interaction": {
-    "type": "script",
-    "path": "/data/local/tmp/agent.js"
-  }
-}
-```
-
-3. launch the game.
+2. launch the game and then try injecting using frida/frida gadget.
    if injection worked, you should see in logcat or the unity console:
 
 ```
