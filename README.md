@@ -1,33 +1,68 @@
 # frida-idiotify
 
 a helper library for calling il2cpp methods in unity games using frida.
-it builds a runtime index of unity il2cpp metadata, handles assemblies, namespaces, and enums automatically, and includes simple wrapper classes for common unity objects like `GameObject` and `Transform`.
+it provides a lightweight abstraction over `frida-il2cpp-bridge`, allowing you to call unity and game methods using simple string paths instead of manually resolving classes and methods.
 
-built on top of `frida-il2cpp-bridge`.
+this version is designed to work **without full domain-wide assembly enumeration**, making it safer for mfuscator / stripped il2cpp builds.
 
 ---
 
 ## requirements
 
 * frida 16+
+* frida gadget or frida server running on device
 * `frida-il2cpp-bridge`
-* unity il2cpp game (android or ios)
-* frida gadget already injected (or attaching with frida)
+* unity il2cpp game (android / quest / ios)
 
 ---
 
-## setup and run
+## build (important)
 
-1. push the scripts to the device:
+you **must compile** the agent before loading it.
 
 ```bash
-adb push agent.js /data/local/tmp/agent.js
-adb push frida-idiotify.js /data/local/tmp/frida-idiotify.js
-adb push wrappers.js /data/local/tmp/wrappers.js
+frida-compile agent.ts -o agent.compiled.js
 ```
 
-2. launch the game and then try injecting using frida/frida gadget.
-   if injection worked, you should see in logcat or the unity console:
+do **not** load raw `.ts` files.
+
+---
+
+## frida gadget config (listen mode)
+
+your frida gadget **must** be configured like this:
+
+```json
+{
+  "interaction": {
+    "type": "listen",
+    "address": "127.0.0.1",
+    "port": 27042,
+    "on_load": "resume"
+  }
+}
+```
+
+this allows frida to attach **after the game is already running**, avoiding freezes and early il2cpp crashes.
+
+---
+
+## running
+
+1. launch the game normally
+2. attach frida and load the compiled agent:
+
+```bash
+frida -U -n [app name] -l agent.compiled.js
+```
+
+example:
+
+```bash
+frida -U -n ProjectBlaze -l agent.compiled.js
+```
+
+if injection worked, you should see:
 
 ```
 [idiotify] injected successfully, have fun doing stuff easily!
@@ -37,68 +72,161 @@ adb push wrappers.js /data/local/tmp/wrappers.js
 
 ## basic usage
 
-all calls must be performed inside `Il2Cpp.perform`.
+all il2cpp interaction must happen inside `Il2Cpp.perform`.
 
 ```js
 Il2Cpp.perform(() => {
     Idiotify.init();
 
-    Idiotify.call("Debug.Log", "calling debug.log through frida-idiotify");
+    Idiotify.call(
+        "UnityEngine.CoreModule::UnityEngine.Debug.Log",
+        "hello from frida"
+    );
 });
 ```
 
 ---
 
-## wrapper example: spawn and move a cube
+## method paths
 
-with the included GameObject and Transform wrappers:
+method paths follow this format:
+
+```
+assembly::namespace.class.method
+```
+
+examples:
 
 ```js
-Il2Cpp.perform(() => {
-    Idiotify.init();
+UnityEngine.CoreModule::UnityEngine.Debug.Log
+Assembly-CSharp::PlayerController.Jump
+```
 
-    const cube = new GameObject("PrimitiveType.Cube");
-    cube.transform.position = Il2Cpp.Vector3(0, 1, 0);
-    cube.active = true;
+assembly is optional, but **recommended** for stability.
 
-    Idiotify.call("Debug.Log", "cube created via wrapper");
-});
+---
+
+## api reference
+
+### `Idiotify.init()`
+
+initializes idiotify.
+
+* does **not** enumerate all assemblies
+* safely touches known assemblies only
+* required before calling anything
+
+```js
+Idiotify.init();
 ```
 
 ---
 
-## calling methods directly
+### `Idiotify.call(path, ...args)`
 
-### static methods
+resolves and invokes a method.
+
+* supports static and instance methods
+* automatically converts js strings to `Il2Cpp.String`
+* caches resolved methods for performance
+
+#### static method
 
 ```js
-Idiotify.call("Debug.Log", "hello");
+Idiotify.call("UnityEngine.CoreModule::UnityEngine.Debug.Log", "hello world");
 ```
 
-### instance methods
+#### instance method
 
 ```js
-Idiotify.call("Button.set_interactable", buttonInstance, true);
+Idiotify.call(
+    "Assembly-CSharp::PlayerController.TakeDamage",
+    playerInstance,
+    5
+);
 ```
 
-### assembly override
+#### with explicit assembly
 
 ```js
-Idiotify.call("Assembly-CSharp::PlayerController.Jump", playerInstance);
+Idiotify.call(
+    "Assembly-CSharp::PlayerController.Jump",
+    playerInstance
+);
 ```
 
 ---
 
-## notes
+### `Idiotify.findMethod(path, argCount?)`
 
-* class and method lookups are cached for performance.
-* enum values can be passed as strings (`PrimitiveType.Cube`).
-* if multiple classes share a name, unityengine and assembly-csharp are preferred automatically.
-* wrapper classes (`GameObject`, `Transform`) provide clean syntax for common operations.
+resolves a method without invoking it.
+
+```js
+const log = Idiotify.findMethod(
+    "UnityEngine.Debug.Log",
+    1
+);
+
+log.invoke(Il2Cpp.string("manual invoke"));
+```
+
+---
+
+## wrappers
+
+idiotify includes optional wrapper helpers for common unity types.
+
+### gameobject
+
+```js
+const cube = new GameObject("PrimitiveType.Cube");
+cube.name = "frida cube";
+cube.active = true;
+```
+
+### transform
+
+```js
+cube.transform.position = Vec3(0, 1, 0);
+cube.transform.scale = Vec3(2, 2, 2);
+```
+
+### renderer + material
+
+```js
+cube.renderer.enabled = true;
+cube.renderer.material.color = Color(1, 0, 0, 1);
+```
+
+---
+
+## value types (vector3 / color)
+
+unity value types are created manually to avoid constructor crashes:
+
+```js
+const pos = Vec3(0, 1, 0);
+const col = Color(1, 0, 0, 1);
+```
+
+these return `Il2Cpp.ValueType` instances compatible with unity apis.
+
+---
+
+## stability notes
+
+* **do not enumerate `domain.assemblies`** on protected games
+* always attach using **listen mode**
+* always run logic inside `Il2Cpp.perform`
+* mfuscator / il2cpp stripping is supported
+* a crash usually mean a method was resolved too early
 
 ---
 
 ## license
-frida-idiotify is released under the **mit license**. you are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of this software, provided that you include the original copyright and license notice in all copies or substantial portions of the software. 
 
-this software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. in no event shall the authors be liable for any claim, damages, or other liability arising from the use of the software.
+frida-idiotify is released under the **mit license**.
+
+permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "software"), to deal in the software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software.
+
+the software is provided "as is", without warranty of any kind.
