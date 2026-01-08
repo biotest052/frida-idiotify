@@ -62,7 +62,7 @@ example:
 frida -U -n ProjectBlaze -l agent.compiled.js
 ```
 
-if injection worked, you should see:
+if injection worked, you should see this in logcat:
 
 ```
 [idiotify] injected successfully, have fun doing stuff easily!
