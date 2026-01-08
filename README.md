@@ -23,6 +23,7 @@ built on top of `frida-il2cpp-bridge`.
 ```bash
 adb push agent.js /data/local/tmp/agent.js
 adb push frida-idiotify.js /data/local/tmp/frida-idiotify.js
+adb push wrappers.js /data/local/tmp/wrappers.js
 ```
 
 2. configure frida gadget to load the agent:
@@ -40,7 +41,7 @@ adb push frida-idiotify.js /data/local/tmp/frida-idiotify.js
    if injection worked, you should see in logcat or the unity console:
 
 ```
-[idiotify] injected successfully
+[idiotify] injected successfully, have fun doing stuff easily!
 ```
 
 ---
